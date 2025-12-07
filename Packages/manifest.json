@@ -1,6 +1,5 @@
 {
   "dependencies": {
-    "com.unify.unified-universal-blur": "file:C:/sappy seals/UI/Unified-Universal-Blur-main",
     "com.unity.2d.sprite": "1.0.0",
     "com.unity.ai.navigation": "2.0.9",
     "com.unity.collab-proxy": "2.10.2",

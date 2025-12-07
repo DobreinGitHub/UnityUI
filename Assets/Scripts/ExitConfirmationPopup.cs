@@ -7,6 +7,25 @@ public class ExitConfirmationPopup : MonoBehaviour
     public Button exitButton;
     public Button closeButton; // The 'X' button
     public Button signOutButton;
+    public GameObject popupWindow; // Drag your Popup_Window GameObject here
+
+    public void ShowPopup()
+    {
+        // 1. Force the Canvas Group Alpha to 0 (Starting point)
+        CanvasGroup cg = popupWindow.GetComponent<CanvasGroup>();
+        if (cg != null)
+        {
+            cg.alpha = 0f;
+        }
+
+        // 2. Activate the GameObject.
+        // The Animator's Entry -> FadeIn_Popup transition will start immediately, 
+        // smoothly animating the Alpha from 0 to 1.
+        popupWindow.SetActive(true);
+
+        // 3. Optional: If you want the exclusive focus to start immediately after the fade:
+        // Call StartCoroutine(SelectButtonAfterDelay()); and add the coroutine below.
+    }
 
     // --- Public Method to Open the Popup ---
 
