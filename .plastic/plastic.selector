@@ -1,4 +1,0 @@
-repository "UI/NEW UI@10170619428259@cloud"
-  path "/"
-    br "/main"
-    co "/main"
