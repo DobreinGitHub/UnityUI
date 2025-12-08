@@ -2,7 +2,7 @@
 using PrimeTween;
 using System.Collections.Generic;
 using System.Linq;
-using UnityEngine.InputSystem; // Required for Keyboard input
+using UnityEngine.InputSystem;
 using UnityEngine.UI;
 
 public class BubbleSwapManager : MonoBehaviour
@@ -16,41 +16,45 @@ public class BubbleSwapManager : MonoBehaviour
     public float swapDuration = 0.3f;
 
     [Header("Cooldown Settings")]
-    [Tooltip("Minimum time (in seconds) between consecutive swap clicks or key presses.")]
     public float swapCooldown = 1.0f;
 
     [Header("Visual Depth Settings")]
-    [Tooltip("Alpha (Opacity) for bubbles that are NOT in the center/focus spot (80%).")]
     public float rearAlpha = 0.8f;
 
     // === RUNTIME DATA ===
     private List<Vector3> currentPositions;
     private int bubbleCount;
-    private int completedSwaps = 0;
 
+    // CRITICAL: Reference the independent float controller script
+    private BubbleFloaterIndependent[] floaters;
+
+    private int completedSwaps = 0;
     private float nextSwapTime = 0f;
+    private int centerBubbleIndex = -1;
 
     void Awake()
     {
         if (bubbleTransforms == null || bubbleTransforms.Length == 0) return;
 
         bubbleCount = bubbleTransforms.Length;
-
         currentPositions = new List<Vector3>();
+        // Initialize the floater array
+        floaters = new BubbleFloaterIndependent[bubbleCount];
 
         for (int i = 0; i < bubbleCount; i++)
         {
             var rt = bubbleTransforms[i];
             currentPositions.Add(new Vector3(rt.anchoredPosition.x, rt.anchoredPosition.y, rt.localPosition.z));
 
-            // Ensure every bubble has a CanvasGroup for alpha control
+            // GET THE FLOATER SCRIPT (Must be attached to the same object as the RectTransform)
+            floaters[i] = rt.GetComponent<BubbleFloaterIndependent>();
+
             if (rt.GetComponent<CanvasGroup>() == null)
             {
                 rt.gameObject.AddComponent<CanvasGroup>();
             }
         }
 
-        // Apply initial visual states instantly
         UpdateVisualStates(instant: true);
     }
 
@@ -58,88 +62,65 @@ public class BubbleSwapManager : MonoBehaviour
     {
         // === KEYBOARD INPUT CHECKING ===
         var keyboard = Keyboard.current;
-
         if (keyboard == null) return;
 
-        if (keyboard.rightArrowKey.wasPressedThisFrame)
-        {
-            PerformSwap(isRight: false);
-        }
-
-        if (keyboard.leftArrowKey.wasPressedThisFrame)
-        {
-            PerformSwap(isRight: true);
-        }
-
-        // NOTE: Escape key logic has been removed as requested.
+        if (keyboard.rightArrowKey.wasPressedThisFrame) PerformSwap(isRight: true);
+        if (keyboard.leftArrowKey.wasPressedThisFrame) PerformSwap(isRight: false);
     }
 
-    // =========================================================
-    // === PUBLIC FUNCTIONS FOR UI BUTTONS ===
-    // =========================================================
-
-    // 📢 Connect your "Swap Left" UI button here.
+    // === PUBLIC FUNCTIONS ===
     public void SwapLeft() => PerformSwap(isRight: false);
-
-    // 📢 Connect your "Swap Right" UI button here.
     public void SwapRight() => PerformSwap(isRight: true);
 
     private void PerformSwap(bool isRight)
     {
-        // === COOLDOWN CHECK ===
-        if (Time.time < nextSwapTime)
-        {
-            return;
-        }
-
-        // 1. Set the next time a swap can occur
+        if (Time.time < nextSwapTime) return;
         nextSwapTime = Time.time + swapCooldown;
 
-        // 2. Calculate the new target positions (Shifting the List)
-        List<Vector3> targetPositions = new List<Vector3>(currentPositions);
+        // 1. STOP FLOATING & RESET OFFSET FOR ALL BUBBLES
+        foreach (var floater in floaters)
+        {
+            // This calls BubbleFloaterIndependent.StopFloat(), resetting the child position to (0,0)
+            floater?.StopFloat();
+        }
 
+        // 2. Calculate Targets (Shift list)
+        List<Vector3> targetPositions = new List<Vector3>(currentPositions);
         if (isRight)
         {
-            // Move the first element to the end 
             Vector3 temp = targetPositions[0];
             targetPositions.RemoveAt(0);
             targetPositions.Add(temp);
         }
         else
         {
-            // Move the last element to the start
             Vector3 temp = targetPositions[targetPositions.Count - 1];
             targetPositions.RemoveAt(targetPositions.Count - 1);
             targetPositions.Insert(0, temp);
         }
 
-        // 3. Force UI Layout Update for stability
+        // 3. Force Layout Update
         foreach (var rt in bubbleTransforms)
         {
             LayoutRebuilder.ForceRebuildLayoutImmediate(rt);
         }
 
-        // Reset counters
         completedSwaps = 0;
 
-        // 4. Start the visual state animation (alpha)
+        // 4. Animate Visuals
         UpdateVisualStates(instant: false, targetPositions);
 
-        // 5. Animate every bubble's position (X, Y, and Z)
+        // 5. Animate Positions (Parent movement)
         for (int i = 0; i < bubbleCount; i++)
         {
             RectTransform rt = bubbleTransforms[i];
             Vector3 targetPos = targetPositions[i];
 
-            // Animate X and Y position
             Tween.UIAnchoredPosition(rt, new Vector2(targetPos.x, targetPos.y), swapDuration);
-
-            // Animate Z position
             Tween.LocalPositionZ(rt, targetPos.z, swapDuration)
                 .OnComplete(() => OnSwapComplete());
         }
 
-        // 6. Update the coordinate list for the next click
         currentPositions = targetPositions;
     }
 
@@ -149,57 +130,52 @@ public class BubbleSwapManager : MonoBehaviour
 
         if (completedSwaps >= bubbleCount)
         {
-            // All animations complete. Ready for next swap.
+            // 6. RESTART FLOATING after swap is totally done
+            foreach (var floater in floaters)
+            {
+                // This calls BubbleFloaterIndependent.StartFloat(), re-engaging the animation
+                floater?.StartFloat();
+            }
         }
     }
-
-    // --- Visual States (Alpha/Depth) ---
 
     private void UpdateVisualStates(bool instant, List<Vector3> futurePositions = null)
     {
         List<Vector3> positionsToAnalyze = futurePositions ?? currentPositions;
-
-        int centerIndex = -1;
+        int newCenterIndex = -1;
         float minZ = float.MaxValue;
 
-        // Find the index of the bubble with the smallest Z value (closest to the camera/center)
         for (int i = 0; i < bubbleCount; i++)
         {
             if (positionsToAnalyze[i].z < minZ)
             {
                 minZ = positionsToAnalyze[i].z;
-                centerIndex = i;
+                newCenterIndex = i;
             }
         }
+
+        centerBubbleIndex = newCenterIndex;
 
         for (int i = 0; i < bubbleCount; i++)
         {
             RectTransform rt = bubbleTransforms[i];
             CanvasGroup cg = rt.GetComponent<CanvasGroup>();
-
             if (cg == null) continue;
 
-            bool isCenter = (i == centerIndex);
+            bool isCenter = (i == centerBubbleIndex);
             float duration = instant ? 0f : swapDuration;
-
             float targetAlpha = isCenter ? 1f : rearAlpha;
 
+            // FIX: Prevent redundant tween warnings
             if (Mathf.Approximately(cg.alpha, targetAlpha))
             {
                 cg.blocksRaycasts = isCenter;
                 continue;
             }
 
-            if (duration > 0f)
-            {
-                Tween.Alpha(cg, targetAlpha, duration);
-            }
-            else
-            {
-                cg.alpha = targetAlpha;
-            }
+            if (duration > 0f) Tween.Alpha(cg, targetAlpha, duration);
+            else cg.alpha = targetAlpha;
 
-            // Only the center bubble should block raycasts (be clickable)
             cg.blocksRaycasts = isCenter;
         }
     }
