@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEngine.UI; // Required for the Button and Selectable classes
 
 public class ExitConfirmationPopup : MonoBehaviour

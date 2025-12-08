@@ -5,69 +5,82 @@ using System.Collections;
 
 public class ExclusiveButtonFocus : MonoBehaviour, IPointerEnterHandler, ISelectHandler, IDeselectHandler
 {
-    // 1. The button component of the OTHER button (used for forcing selection transfer).
+    [Header("Core Focus Control")]
     public Selectable otherButton;
 
-    // 2. The FX container for THIS button (used to turn THIS animation ON).
+    [Header("FX Layer Control")]
     public GameObject thisFxContainer;
-
-    // 3. The FX container for the OTHER button (used to explicitly turn the OTHER animation OFF).
     public GameObject otherFxContainer;
 
+    private PrimeOutlineFX thisPrimeFX;
+    private PrimeOutlineFX otherPrimeFX;
 
-    // --- 1. Forces Selection on Hover (Initiates the exclusive highlight) ---
+    void Awake()
+    {
+        if (thisFxContainer != null)
+        {
+            thisPrimeFX = thisFxContainer.GetComponent<PrimeOutlineFX>();
+        }
+        if (otherFxContainer != null)
+        {
+            otherPrimeFX = otherFxContainer.GetComponent<PrimeOutlineFX>();
+        }
+    }
+
     public void OnPointerEnter(PointerEventData eventData)
     {
-        // 1. Force the selection onto THIS button.
         gameObject.GetComponent<Selectable>().Select();
     }
 
-    // --- 2. Turns THIS Animation ON (When this button gains focus) ---
     public void OnSelect(BaseEventData eventData)
     {
-        // A. Turn THIS button's FX container ON.
+        // C. STOP the OTHER button's PrimeTween animation and hide it
+        if (otherPrimeFX != null)
+        {
+            otherPrimeFX.StopAnimation();
+            otherFxContainer.SetActive(false);
+        }
+
+        // A. Set THIS container ACTIVE immediately.
         if (thisFxContainer != null)
         {
             thisFxContainer.SetActive(true);
         }
 
-        // B. Explicitly turn the OTHER button's FX container OFF.
-        // This handles cases where the other button might not fully Deselect instantly.
-        if (otherFxContainer != null)
+        // B. FIX: Start the animation on the next frame to avoid the "Tween on inactive target" warning.
+        if (thisPrimeFX != null)
         {
-            otherFxContainer.SetActive(false);
+            StartCoroutine(StartFXCoroutine(thisPrimeFX));
         }
     }
 
     public void OnDeselect(BaseEventData eventData)
     {
-        // A. Turn THIS button's FX container OFF (This is needed only if the other button was selected)
-        // We keep this to ensure the animation turns off when focus moves to the other button.
-        if (thisFxContainer != null)
+        // A. STOP THIS button's PrimeTween animation
+        if (thisPrimeFX != null)
         {
+            thisPrimeFX.StopAnimation();
             thisFxContainer.SetActive(false);
         }
 
-        // 🛑 B. THE FIX: Force the button to re-select itself after a tiny delay.
-        // This allows the Event System to process the click on the background, 
-        // but immediately puts the focus back on the button, restoring the Color Tint.
+        // B. Lock the highlight back onto this button if the user clicked outside.
         StartCoroutine(ReSelect(gameObject.GetComponent<Selectable>()));
     }
 
-    // New Coroutine: Re-selects the button after the current frame is finished.
+    // --- Coroutines ---
+
+    private IEnumerator StartFXCoroutine(PrimeOutlineFX fxScript)
+    {
+        yield return null; // Wait one frame
+        fxScript.PlayAnimation();
+    }
+
     private IEnumerator ReSelect(Selectable button)
     {
-        // Yielding null waits one frame.
         yield return null;
-
-        // Only re-select if no other button has taken the selection.
         if (EventSystem.current.currentSelectedGameObject == null)
         {
             button.Select();
         }
     }
-
-    // NOTE: The OnDeselect logic is not strictly necessary for turning the OTHER FX off, 
-    // because the OnSelect of the *next* button handles the hiding. 
-    // The OnSelect method above is the definitive controller for the visibility.
 }
