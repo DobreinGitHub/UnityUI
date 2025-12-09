@@ -58,6 +58,9 @@ public class BubbleSwapManager : MonoBehaviour
         UpdateVisualStates(instant: true);
     }
 
+    /*
+    // KEYBOARD INPUT REMOVED: 
+    // This section was removed to disable the Left/Right arrow key swapping.
     void Update()
     {
         // === KEYBOARD INPUT CHECKING ===
@@ -67,6 +70,7 @@ public class BubbleSwapManager : MonoBehaviour
         if (keyboard.rightArrowKey.wasPressedThisFrame) PerformSwap(isRight: true);
         if (keyboard.leftArrowKey.wasPressedThisFrame) PerformSwap(isRight: false);
     }
+    */
 
     // === PUBLIC FUNCTIONS ===
     public void SwapLeft() => PerformSwap(isRight: false);
