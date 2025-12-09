@@ -9,6 +9,15 @@ public class BubbleSwapManager : MonoBehaviour
 {
     // === CONFIGURATION ===
 
+    [Tooltip("The RectTransforms for the Distortion child elements corresponding to the bubbles.")]
+    public RectTransform[] distortionRects; // NEW FIELD
+
+    [Header("Distortion Visuals")]
+    [Tooltip("Target scale for the distortion effect when the bubble is centered.")]
+    public float centerDistortionScale = 1.0f; // NEW FIELD
+    [Tooltip("Target scale for the distortion effect when the bubble is in the rear.")]
+    public float rearDistortionScale = 0.5f; // NEW FIELD
+
     [Tooltip("List of all bubble containers (RectTransforms) in order.")]
     public RectTransform[] bubbleTransforms;
 
@@ -44,6 +53,7 @@ public class BubbleSwapManager : MonoBehaviour
         for (int i = 0; i < bubbleCount; i++)
         {
             var rt = bubbleTransforms[i];
+            // Stores the initial screen position (X/Y) and Z depth (localPosition.z)
             currentPositions.Add(new Vector3(rt.anchoredPosition.x, rt.anchoredPosition.y, rt.localPosition.z));
 
             // GET THE FLOATER SCRIPT (Must be attached to the same object as the RectTransform)
@@ -58,19 +68,12 @@ public class BubbleSwapManager : MonoBehaviour
         UpdateVisualStates(instant: true);
     }
 
-    /*
-    // KEYBOARD INPUT REMOVED: 
-    // This section was removed to disable the Left/Right arrow key swapping.
-    void Update()
+    // PUBLIC ACCESSOR: Used by BubbleMenuAnimator to retrieve the current swapped state
+    public List<Vector3> GetCurrentPositions()
     {
-        // === KEYBOARD INPUT CHECKING ===
-        var keyboard = Keyboard.current;
-        if (keyboard == null) return;
-
-        if (keyboard.rightArrowKey.wasPressedThisFrame) PerformSwap(isRight: true);
-        if (keyboard.leftArrowKey.wasPressedThisFrame) PerformSwap(isRight: false);
+        // currentPositions stores the X, Y, and Z position of each bubble's target state.
+        return currentPositions;
     }
-    */
 
     // === PUBLIC FUNCTIONS ===
     public void SwapLeft() => PerformSwap(isRight: false);
@@ -84,7 +87,6 @@ public class BubbleSwapManager : MonoBehaviour
         // 1. STOP FLOATING & RESET OFFSET FOR ALL BUBBLES
         foreach (var floater in floaters)
         {
-            // This calls BubbleFloaterIndependent.StopFloat(), resetting the child position to (0,0)
             floater?.StopFloat();
         }
 
@@ -137,11 +139,12 @@ public class BubbleSwapManager : MonoBehaviour
             // 6. RESTART FLOATING after swap is totally done
             foreach (var floater in floaters)
             {
-                // This calls BubbleFloaterIndependent.StartFloat(), re-engaging the animation
                 floater?.StartFloat();
             }
         }
     }
+
+    // In BubbleSwapManager.cs
 
     private void UpdateVisualStates(bool instant, List<Vector3> futurePositions = null)
     {
@@ -159,6 +162,10 @@ public class BubbleSwapManager : MonoBehaviour
         }
 
         centerBubbleIndex = newCenterIndex;
+        float duration = instant ? 0f : swapDuration;
+
+        // Check if we have distortion elements before proceeding
+        bool useDistortion = distortionRects != null && distortionRects.Length == bubbleCount;
 
         for (int i = 0; i < bubbleCount; i++)
         {
@@ -167,20 +174,33 @@ public class BubbleSwapManager : MonoBehaviour
             if (cg == null) continue;
 
             bool isCenter = (i == centerBubbleIndex);
-            float duration = instant ? 0f : swapDuration;
+
+            // --- ALPHA / INTERACTION CONTROL ---
             float targetAlpha = isCenter ? 1f : rearAlpha;
-
-            // FIX: Prevent redundant tween warnings
-            if (Mathf.Approximately(cg.alpha, targetAlpha))
+            if (!Mathf.Approximately(cg.alpha, targetAlpha))
             {
-                cg.blocksRaycasts = isCenter;
-                continue;
+                if (duration > 0f) Tween.Alpha(cg, targetAlpha, duration);
+                else cg.alpha = targetAlpha;
             }
-
-            if (duration > 0f) Tween.Alpha(cg, targetAlpha, duration);
-            else cg.alpha = targetAlpha;
-
             cg.blocksRaycasts = isCenter;
+
+
+            // --- DISTORTION SCALE CONTROL (NEW LOGIC) ---
+            if (useDistortion)
+            {
+                RectTransform distortionRt = distortionRects[i];
+                float targetScale = isCenter ? centerDistortionScale : rearDistortionScale;
+                Vector3 targetVector = Vector3.one * targetScale;
+
+                if (duration > 0f)
+                {
+                    Tween.Scale(distortionRt, targetVector, duration);
+                }
+                else
+                {
+                    distortionRt.localScale = targetVector;
+                }
+            }
         }
     }
 }

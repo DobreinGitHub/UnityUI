@@ -1,6 +1,7 @@
 using PrimeTween;
 using UnityEngine;
-using UnityEngine.UI; // Required for RectTransform and CanvasGroup
+using UnityEngine.UI;
+using System.Collections.Generic;
 
 public class BubbleMenuAnimator : MonoBehaviour
 {
@@ -11,9 +12,7 @@ public class BubbleMenuAnimator : MonoBehaviour
 
     // --- Control Button Configuration ---
     [Header("Control Buttons")]
-    [Tooltip("The RectTransform for the left control button (Control Left).")]
     [SerializeField] private RectTransform controlLeftRect;
-    [Tooltip("The RectTransform for the right control button (Control Right).")]
     [SerializeField] private RectTransform controlRightRect;
 
     private CanvasGroup controlLeftGroup;
@@ -23,32 +22,36 @@ public class BubbleMenuAnimator : MonoBehaviour
     [Header("Animation Settings")]
     [Tooltip("How long the position transition should last.")]
     [SerializeField] private float duration = 1.5f;
-    [Tooltip("The delay between each bubble starting its move. Set to 0.0 for simultaneous start.")]
+    [Tooltip("The delay between each bubble starting its move.")]
     [SerializeField] private float staggerDelay = 0.1f;
 
-    [Tooltip("The vertical distance from the final position where the bubbles start (less distance = less aggressive).")]
+    [Tooltip("The vertical distance from the final position where the bubbles start.")]
     [SerializeField] private float verticalOffset = 200f;
 
-    [Tooltip("The time (in seconds) the scale tween takes. Smaller value = faster pop.")]
+    [Tooltip("The time (in seconds) the scale tween takes.")]
     [SerializeField] private float scaleSpeedFactor = 0.4f;
 
     [Tooltip("The time (in seconds) the alpha fade tween takes.")]
     [SerializeField] private float fadeSpeedFactor = 0.8f;
 
-    [Tooltip("The initial size the bubbles start from (0.0 is invisible).")]
+    [Tooltip("The initial size the bubbles start from.")]
     [SerializeField] private float initialScaleFactor = 0.2f;
 
-    [Tooltip("If checked, uses the 'OutBack' ease for a controlled overshoot ('pop'). If unchecked, uses smooth 'OutCubic'.")]
+    [Tooltip("Uses 'OutBack' ease for a controlled overshoot ('pop').")]
     [SerializeField] private bool usePopScaleEffect = false;
 
     [Header("Control Animation")]
-    [Tooltip("Delay AFTER the main bubble animation finishes before controls appear.")]
     [SerializeField] private float controlsAppearDelay = 0.5f;
-    [Tooltip("Duration of the controls' fade/move in animation.")]
     [SerializeField] private float controlsAnimationDuration = 0.5f;
+
+    // INTEGRATION FIELD - Must be linked in Inspector
+    [Header("Integration")]
+    [Tooltip("Reference to the BubbleSwapManager for state restoration.")]
+    [SerializeField] private BubbleSwapManager swapManager;
 
     // Runtime storage
     private Vector3[] targetPositions;
+    private float[] initialLocalZ; // Store original Z for a perfect reset
     private BubbleFloaterIndependent[] floaters;
     private CanvasGroup[] canvasGroups;
 
@@ -57,7 +60,7 @@ public class BubbleMenuAnimator : MonoBehaviour
     {
         if (bubbleRects == null || bubbleRects.Length == 0)
         {
-            Debug.LogError("Bubble Rects array is empty. Please assign your 5 bubble RectTransforms in the Inspector.");
+            Debug.LogError("Bubble Rects array is empty.");
             enabled = false;
             return;
         }
@@ -68,10 +71,13 @@ public class BubbleMenuAnimator : MonoBehaviour
         floaters = new BubbleFloaterIndependent[numBubbles];
         canvasGroups = new CanvasGroup[numBubbles];
         targetPositions = new Vector3[numBubbles];
+        initialLocalZ = new float[numBubbles];
 
         for (int i = 0; i < numBubbles; i++)
         {
             targetPositions[i] = bubbleRects[i].anchoredPosition;
+            initialLocalZ[i] = bubbleRects[i].localPosition.z;
+
             floaters[i] = bubbleRects[i].GetComponent<BubbleFloaterIndependent>();
             canvasGroups[i] = GetOrAddCanvasGroup(bubbleRects[i]);
 
@@ -89,7 +95,6 @@ public class BubbleMenuAnimator : MonoBehaviour
             controlLeftGroup = GetOrAddCanvasGroup(controlLeftRect);
             controlRightGroup = GetOrAddCanvasGroup(controlRightRect);
 
-            // Hide and disable interactivity instantly
             controlLeftGroup.alpha = 0f;
             controlRightGroup.alpha = 0f;
             controlLeftGroup.blocksRaycasts = false;
@@ -101,7 +106,6 @@ public class BubbleMenuAnimator : MonoBehaviour
         AnimateMenuIn();
     }
 
-    // Helper to ensure CanvasGroup exists
     private CanvasGroup GetOrAddCanvasGroup(RectTransform rect)
     {
         CanvasGroup cg = rect.GetComponent<CanvasGroup>();
@@ -112,6 +116,7 @@ public class BubbleMenuAnimator : MonoBehaviour
         return cg;
     }
 
+    // Calculates the default, unswapped, off-screen position for bubble i
     private Vector3 GetStartPosition(int index)
     {
         float startX = targetPositions[index].x;
@@ -127,7 +132,13 @@ public class BubbleMenuAnimator : MonoBehaviour
             RectTransform rect = bubbleRects[i];
 
             rect.localScale = Vector3.one * initialScaleFactor;
+            // Snaps X/Y to the original unswapped off-screen location
             rect.anchoredPosition = GetStartPosition(i);
+
+            // Snaps Z to the original depth
+            Vector3 currentLocalPos = rect.localPosition;
+            rect.localPosition = new Vector3(currentLocalPos.x, currentLocalPos.y, initialLocalZ[i]);
+
             canvasGroups[i].alpha = 0f;
         }
     }
@@ -140,7 +151,41 @@ public class BubbleMenuAnimator : MonoBehaviour
         int numBubbles = bubbleRects.Length;
         Ease scaleInEase = usePopScaleEffect ? Ease.OutBack : Ease.OutCubic;
 
-        // 1. Stop all previous tweens and the float effect
+        // 1. Determine the final positions (swapped or unswapped)
+        List<Vector3> finalPositions;
+        if (swapManager != null && swapManager.GetCurrentPositions().Count == numBubbles)
+        {
+            finalPositions = swapManager.GetCurrentPositions();
+        }
+        else
+        {
+            finalPositions = new List<Vector3>();
+            for (int i = 0; i < numBubbles; i++)
+            {
+                finalPositions.Add(new Vector3(targetPositions[i].x, targetPositions[i].y, initialLocalZ[i]));
+            }
+        }
+
+        // 2. Determine the target alpha values
+        float rearAlphaValue = 1f;
+        if (swapManager != null)
+        {
+            rearAlphaValue = swapManager.rearAlpha;
+        }
+
+        // Find the center bubble (lowest Z in the target state)
+        float minZ = float.MaxValue;
+        int centerIndex = -1;
+        for (int i = 0; i < numBubbles; i++)
+        {
+            if (finalPositions[i].z < minZ)
+            {
+                minZ = finalPositions[i].z;
+                centerIndex = i;
+            }
+        }
+
+        // 3. Stop all previous tweens and the float effect
         for (int i = 0; i < numBubbles; i++)
         {
             Tween.StopAll(bubbleRects[i]);
@@ -152,23 +197,34 @@ public class BubbleMenuAnimator : MonoBehaviour
             RectTransform rect = bubbleRects[i];
 
             float startTime = i * staggerDelay;
-            Vector3 finalPosition = targetPositions[i];
+            Vector3 finalPosition = finalPositions[i];
 
-            // 1. Position Tween (Lift Up)
-            Tween.UIAnchoredPosition(rect, finalPosition, duration, Ease.OutCubic, startDelay: startTime);
+            // 4. Position Tweens (Vertical Lift Up)
+            // FIX: Instantly snap X to the final target X to enable vertical-only movement.
+            rect.anchoredPosition = new Vector2(finalPosition.x, rect.anchoredPosition.y);
 
-            // 2. Scale Tween (Pop Out to original size 1.0)
+            // Tween the Y position upwards.
+            Tween.UIAnchoredPosition(rect, new Vector2(finalPosition.x, finalPosition.y), duration, Ease.OutCubic, startDelay: startTime);
+
+            // OPTIMIZATION FIX: Only tween Z if the target Z is different from the current Z
+            if (!Mathf.Approximately(rect.localPosition.z, finalPosition.z))
+            {
+                // Animate Z position to the stored swapped depth
+                Tween.LocalPositionZ(rect, finalPosition.z, duration, Ease.OutCubic, startDelay: startTime);
+            }
+
+            // 5. Scale and Alpha Tweens
             Tween.Scale(rect, Vector3.one, scaleSpeedFactor, scaleInEase, startDelay: startTime);
 
-            // 3. Alpha Tween (Fade In)
-            Tween.Alpha(canvasGroups[i], 1f, fadeSpeedFactor, Ease.Linear, startDelay: startTime);
+            // Tween to the correct final alpha based on whether it is the center bubble.
+            float targetAlpha = (i == centerIndex) ? 1f : rearAlphaValue;
+            Tween.Alpha(canvasGroups[i], targetAlpha, fadeSpeedFactor, Ease.Linear, startDelay: startTime);
         }
 
-        // 4. Schedule the restart of the floating animation AND button appearance
+        // 6. Schedule the restart of the floating animation AND button appearance
         float maxSingleTweenTime = Mathf.Max(duration, scaleSpeedFactor, fadeSpeedFactor);
         float totalBubbleAnimationTime = (numBubbles - 1) * staggerDelay + maxSingleTweenTime;
 
-        // Time when controls start moving
         float controlsStartTime = totalBubbleAnimationTime + controlsAppearDelay;
 
         // A. Restart floaters after bubbles finish
@@ -190,12 +246,10 @@ public class BubbleMenuAnimator : MonoBehaviour
             controlLeftRect.anchoredPosition = finalLeftPos + Vector2.down * 20f;
             controlRightRect.anchoredPosition = finalRightPos + Vector2.down * 20f;
 
-            // Animate Left Control: Move and Fade
             Tween.UIAnchoredPosition(controlLeftRect, finalLeftPos, controlsAnimationDuration, Ease.OutCubic, startDelay: controlsStartTime);
             Tween.Alpha(controlLeftGroup, 1f, controlsAnimationDuration, Ease.Linear, startDelay: controlsStartTime)
                 .OnComplete(() => controlLeftGroup.blocksRaycasts = true);
 
-            // Animate Right Control: Move and Fade
             Tween.UIAnchoredPosition(controlRightRect, finalRightPos, controlsAnimationDuration, Ease.OutCubic, startDelay: controlsStartTime);
             Tween.Alpha(controlRightGroup, 1f, controlsAnimationDuration, Ease.Linear, startDelay: controlsStartTime)
                 .OnComplete(() => controlRightGroup.blocksRaycasts = true);
@@ -205,15 +259,14 @@ public class BubbleMenuAnimator : MonoBehaviour
     public void AnimateMenuOut()
     {
         int numBubbles = bubbleRects.Length;
-        // Use InBack or InCubic for a quick disappearing effect
         Ease scaleOutEase = usePopScaleEffect ? Ease.InBack : Ease.InCubic;
 
-        // 1. Hide Controls Instantly (or with a small fade if desired)
+        // 1. Hide Controls Instantly
         if (controlLeftGroup != null)
         {
             controlLeftGroup.blocksRaycasts = false;
             controlRightGroup.blocksRaycasts = false;
-            Tween.Alpha(controlLeftGroup, 0f, 0.2f); // Optional small fade out
+            Tween.Alpha(controlLeftGroup, 0f, 0.2f);
             Tween.Alpha(controlRightGroup, 0f, 0.2f);
         }
 
@@ -230,7 +283,13 @@ public class BubbleMenuAnimator : MonoBehaviour
             RectTransform rect = bubbleRects[i];
 
             float startTime = (numBubbles - 1 - i) * staggerDelay;
-            Vector3 destinationPosition = GetStartPosition(i);
+
+            // Calculates the destination position using the CURRENT X position (vertical-only exit).
+            Vector2 currentAnchoredPos = rect.anchoredPosition;
+            Vector2 destinationPosition = new Vector2(
+                currentAnchoredPos.x,
+                currentAnchoredPos.y - verticalOffset
+            );
 
             // 1. Position Tween (Move Down Off-Screen)
             Tween.UIAnchoredPosition(rect, destinationPosition, duration, Ease.InCubic, startDelay: startTime);
@@ -239,10 +298,29 @@ public class BubbleMenuAnimator : MonoBehaviour
             Tween.Scale(rect, Vector3.one * initialScaleFactor, scaleSpeedFactor, scaleOutEase, startDelay: startTime);
 
             // 3. Alpha Tween (Fade Out)
-            Tween.Alpha(canvasGroups[i], 0f, fadeSpeedFactor, Ease.Linear, startDelay: startTime);
+            Tween tween = Tween.Alpha(canvasGroups[i], 0f, fadeSpeedFactor, Ease.Linear, startDelay: startTime);
 
-            // NOTE: Add OnComplete call here if you need to run an action (like showing the quit pop-up) 
-            // after the entire menu closes. You'd check for i == 0 (the last bubble to animate).
+            // OnComplete action for the very last bubble's tween (when i == 0)
+            if (i == 0)
+            {
+                tween.OnComplete(() => ResetBubblesToStartPosition());
+            }
         }
+    }
+
+    // --- Testing / Debug Utility ---
+    public void ReplayMenuAnimation()
+    {
+        AnimateMenuOut();
+
+        int numBubbles = bubbleRects.Length;
+        float maxSingleDuration = Mathf.Max(duration, scaleSpeedFactor, fadeSpeedFactor);
+        float totalExitTime = (numBubbles - 1) * staggerDelay + maxSingleDuration;
+        float delayBeforeReplay = totalExitTime + 0.1f;
+
+        Tween.Delay(delayBeforeReplay).OnComplete(() =>
+        {
+            AnimateMenuIn();
+        });
     }
 }
