@@ -21,9 +21,9 @@ public class BubbleMenuAnimator : MonoBehaviour
     // --- Animation Settings ---
     [Header("Animation Settings")]
     [Tooltip("How long the position transition should last.")]
-    [SerializeField] private float duration = 1.5f;
+    [SerializeField] public float duration = 1.5f;
     [Tooltip("The delay between each bubble starting its move.")]
-    [SerializeField] private float staggerDelay = 0.1f;
+    [SerializeField] public float staggerDelay = 0.1f;
 
     [Tooltip("The vertical distance from the final position where the bubbles start.")]
     [SerializeField] private float verticalOffset = 200f;
@@ -32,7 +32,7 @@ public class BubbleMenuAnimator : MonoBehaviour
     [SerializeField] private float scaleSpeedFactor = 0.4f;
 
     [Tooltip("The time (in seconds) the alpha fade tween takes.")]
-    [SerializeField] private float fadeSpeedFactor = 0.8f;
+    [SerializeField] public float fadeSpeedFactor = 0.8f;
 
     [Tooltip("The initial size the bubbles start from.")]
     [SerializeField] private float initialScaleFactor = 0.2f;
@@ -148,6 +148,9 @@ public class BubbleMenuAnimator : MonoBehaviour
 
     public void AnimateMenuIn()
     {
+        // 0. Immediately disable interaction at the start of the sequence
+        SetMenuInteractive(false);
+
         int numBubbles = bubbleRects.Length;
         Ease scaleInEase = usePopScaleEffect ? Ease.OutBack : Ease.OutCubic;
 
@@ -227,13 +230,17 @@ public class BubbleMenuAnimator : MonoBehaviour
 
         float controlsStartTime = totalBubbleAnimationTime + controlsAppearDelay;
 
-        // A. Restart floaters after bubbles finish
+        // A. Restart floaters and REFRESH INTERACTIVITY after bubbles finish
         Tween.Delay(totalBubbleAnimationTime).OnComplete(() =>
         {
             foreach (var floater in floaters)
             {
                 floater?.StartFloat();
             }
+
+            // CRITICAL: Tell the swap manager to re-check and set the correct raycast state 
+            // (i.e., enable raycasts ONLY on the center bubble).
+            swapManager?.UpdateVisualStates(instant: true);
         });
 
         // B. Animate Controls In
@@ -260,6 +267,9 @@ public class BubbleMenuAnimator : MonoBehaviour
     {
         int numBubbles = bubbleRects.Length;
         Ease scaleOutEase = usePopScaleEffect ? Ease.InBack : Ease.InCubic;
+
+        // 0. Immediately disable interaction at the start of the sequence
+        SetMenuInteractive(false);
 
         // 1. Hide Controls Instantly
         if (controlLeftGroup != null)
@@ -322,5 +332,27 @@ public class BubbleMenuAnimator : MonoBehaviour
         {
             AnimateMenuIn();
         });
+    }
+
+    // --- Interaction Helper ---
+    public void SetMenuInteractive(bool isInteractive)
+    {
+        // Set blocksRaycasts for all elements managed by the animator (bubbles and controls)
+
+        // 1. Temporarily disable ALL bubble raycasts if we are NOT interactive.
+        for (int i = 0; i < canvasGroups.Length; i++)
+        {
+            canvasGroups[i].blocksRaycasts = isInteractive;
+        }
+
+        // 2. For Controls: Handle the control buttons explicitly.
+        if (controlLeftGroup != null)
+        {
+            controlLeftGroup.blocksRaycasts = isInteractive;
+        }
+        if (controlRightGroup != null)
+        {
+            controlRightGroup.blocksRaycasts = isInteractive;
+        }
     }
 }

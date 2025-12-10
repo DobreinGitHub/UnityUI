@@ -146,7 +146,7 @@ public class BubbleSwapManager : MonoBehaviour
 
     // In BubbleSwapManager.cs
 
-    private void UpdateVisualStates(bool instant, List<Vector3> futurePositions = null)
+    public void UpdateVisualStates(bool instant, List<Vector3> futurePositions = null)
     {
         List<Vector3> positionsToAnalyze = futurePositions ?? currentPositions;
         int newCenterIndex = -1;
